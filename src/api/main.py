@@ -127,11 +127,12 @@ async def process_video_async(video_id: int, file_path: str, db: Session):
         
         # Save analysis results
         try:
+            play_types = list(result.get("play_breakdown", {}).get("play_types", {}).keys())
             analysis = Analysis(
                 video_id=video_id,
                 start_frame=result.get("plays", [{}])[0].get("start_frame", 0) if result.get("plays") else 0,
                 end_frame=result.get("plays", [{}])[-1].get("end_frame", 0) if result.get("plays") else 0,
-                play_type=result.get("play_breakdown", {}).get("play_types", {}).keys()[0] if result.get("play_breakdown", {}).get("play_types") else None,
+                play_type=play_types[0] if play_types else None,
                 confidence=1.0,  # Default confidence since we don't have a specific metric
                 analysis_metadata=result,  # Store the entire result as metadata
                 processing_time=result.get("processing_stats", {}).get("total_time")

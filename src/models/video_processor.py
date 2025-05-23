@@ -40,28 +40,28 @@ class VideoProcessor:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
             logger.info(f"Using device: {self.device}")
             
-            # Initialize YOLOv8 for player detection
+            # Initialize YOLOv8 for player detection with smaller model
             try:
-                self.detector = YOLO('yolov8x.pt')
+                self.detector = YOLO('yolov8n.pt')  # Using nano model instead of x
                 logger.info("YOLOv8 model loaded successfully")
             except Exception as e:
                 logger.error(f"Failed to load YOLOv8 model: {str(e)}")
                 raise
             
-            # Initialize DeepSORT for player tracking
+            # Initialize DeepSORT for player tracking with optimized settings
             try:
-                self.tracker = DeepSort(max_age=30)
+                self.tracker = DeepSort(max_age=15)  # Reduced max age for faster tracking
                 logger.info("DeepSORT tracker initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize DeepSORT: {str(e)}")
                 raise
             
-            # Initialize MediaPipe for pose estimation
+            # Initialize MediaPipe for pose estimation with lower complexity
             try:
                 self.mp_pose = mp.solutions.pose
                 self.pose = self.mp_pose.Pose(
                     static_image_mode=False,
-                    model_complexity=2,
+                    model_complexity=1,  # Reduced complexity
                     min_detection_confidence=0.5
                 )
                 logger.info("MediaPipe Pose initialized successfully")
@@ -209,55 +209,86 @@ class VideoProcessor:
         Returns:
             List of detected players with bounding boxes and confidence scores
         """
-        results = self.detector(frame, classes=[0])  # class 0 is person
-        detections = []
-        
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                conf = box.conf[0].cpu().numpy()
-                if conf > 0.5:  # Confidence threshold
-                    detections.append({
-                        'bbox': [x1, y1, x2, y2],
-                        'confidence': conf
-                    })
-        
-        return detections
+        try:
+            results = self.detector(frame, classes=[0])  # class 0 is person
+            detections = []
+            
+            for r in results:
+                boxes = r.boxes
+                for box in boxes:
+                    try:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(np.float32)
+                        conf = float(box.conf[0].cpu().numpy())
+                        if conf > 0.5:  # Confidence threshold
+                            detections.append({
+                                'bbox': [float(x1), float(y1), float(x2), float(y2)],
+                                'confidence': conf
+                            })
+                    except (AttributeError, IndexError) as e:
+                        logger.error(f"Error processing detection box: {str(e)}")
+                        continue
+            
+            return detections
+            
+        except Exception as e:
+            logger.error(f"Error in player detection: {str(e)}")
+            return []
 
     def track_players(self, frame: np.ndarray, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Track players across frames using DeepSORT
         
         Args:
-            frame: Input frame
-            detections: List of player detections
+            frame: Current video frame
+            detections: List of player detections from YOLOv8
             
         Returns:
-            List of tracked players with IDs and positions
+            List of tracked players with their IDs and bounding boxes
         """
-        # Convert detections to DeepSORT format
-        bboxes = np.array([d['bbox'] for d in detections])
-        
-        # Update tracker - DeepSORT expects bboxes in [x1, y1, x2, y2] format
-        tracks = self.tracker.update_tracks(bboxes, frame=frame)
-        
-        # Convert tracks to our format
-        tracked_players = []
-        for track in tracks:
-            if not track.is_confirmed():
-                continue
+        try:
+            if not detections:
+                return []
+
+            # Convert detections to DeepSORT format
+            bboxes = []
+            scores = []
+            for det in detections:
+                if isinstance(det['bbox'], (list, np.ndarray)) and len(det['bbox']) == 4:
+                    bboxes.append(det['bbox'])
+                    scores.append(det['confidence'])
+                else:
+                    logger.warning(f"Skipping invalid bbox format: {det['bbox']}")
+
+            if not bboxes:
+                return []
+
+            # Convert to numpy arrays
+            bboxes = np.array(bboxes)
+            scores = np.array(scores)
+
+            # Update tracker
+            tracks = self.tracker.update_tracks(bboxes, scores=scores, frame=frame)
+            
+            # Convert tracks to our format
+            tracked_players = []
+            for track in tracks:
+                if not track.is_confirmed():
+                    continue
+                    
+                track_id = track.track_id
+                bbox = track.to_tlbr()
                 
-            track_id = track.track_id
-            bbox = track.to_tlbr()
+                tracked_players.append({
+                    'id': track_id,
+                    'bbox': bbox.tolist(),
+                    'confidence': track.det_conf
+                })
             
-            tracked_players.append({
-                'id': track_id,
-                'bbox': bbox.tolist(),
-                'position': [(bbox[0] + bbox[2])/2, (bbox[1] + bbox[3])/2]  # Center point
-            })
+            return tracked_players
             
-        return tracked_players
+        except Exception as e:
+            logger.error(f"Error in player tracking: {str(e)}")
+            return []
 
     def estimate_pose(self, frame: np.ndarray, bbox: List[float]) -> Dict[str, Any]:
         """
@@ -312,40 +343,44 @@ class VideoProcessor:
                 return "unknown"
             
             # Get pose landmarks
-            pose_results = self.pose.process(player_region)
+            pose_results = self.pose.process(cv2.cvtColor(player_region, cv2.COLOR_BGR2RGB))
             if not pose_results.pose_landmarks:
                 return "unknown"
             
             # Extract key points
             landmarks = pose_results.pose_landmarks.landmark
             
-            # Get relevant key points
-            left_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
-            right_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
-            left_elbow = landmarks[self.mp_pose.PoseLandmark.LEFT_ELBOW]
-            right_elbow = landmarks[self.mp_pose.PoseLandmark.RIGHT_ELBOW]
-            left_wrist = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST]
-            right_wrist = landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST]
-            left_hip = landmarks[self.mp_pose.PoseLandmark.LEFT_HIP]
-            right_hip = landmarks[self.mp_pose.PoseLandmark.RIGHT_HIP]
-            left_knee = landmarks[self.mp_pose.PoseLandmark.LEFT_KNEE]
-            right_knee = landmarks[self.mp_pose.PoseLandmark.RIGHT_KNEE]
-            
-            # Calculate angles
-            left_arm_angle = self._calculate_angle(left_shoulder, left_elbow, left_wrist)
-            right_arm_angle = self._calculate_angle(right_shoulder, right_elbow, right_wrist)
-            left_leg_angle = self._calculate_angle(left_hip, left_knee, left_wrist)
-            right_leg_angle = self._calculate_angle(right_hip, right_knee, right_wrist)
-            
-            # Simple action recognition based on pose angles
-            if left_arm_angle > 150 and right_arm_angle > 150:
-                return "shooting"
-            elif left_arm_angle < 90 and right_arm_angle < 90:
-                return "dribbling"
-            elif left_leg_angle < 90 and right_leg_angle < 90:
-                return "defense"
-            else:
-                return "running"
+            try:
+                # Get relevant key points
+                left_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
+                right_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+                left_elbow = landmarks[self.mp_pose.PoseLandmark.LEFT_ELBOW]
+                right_elbow = landmarks[self.mp_pose.PoseLandmark.RIGHT_ELBOW]
+                left_wrist = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST]
+                right_wrist = landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST]
+                left_hip = landmarks[self.mp_pose.PoseLandmark.LEFT_HIP]
+                right_hip = landmarks[self.mp_pose.PoseLandmark.RIGHT_HIP]
+                left_knee = landmarks[self.mp_pose.PoseLandmark.LEFT_KNEE]
+                right_knee = landmarks[self.mp_pose.PoseLandmark.RIGHT_KNEE]
+                
+                # Calculate angles
+                left_arm_angle = self._calculate_angle(left_shoulder, left_elbow, left_wrist)
+                right_arm_angle = self._calculate_angle(right_shoulder, right_elbow, right_wrist)
+                left_leg_angle = self._calculate_angle(left_hip, left_knee, left_wrist)
+                right_leg_angle = self._calculate_angle(right_hip, right_knee, right_wrist)
+                
+                # Simple action recognition based on pose angles
+                if left_arm_angle > 150 and right_arm_angle > 150:
+                    return "shooting"
+                elif left_arm_angle < 90 and right_arm_angle < 90:
+                    return "dribbling"
+                elif left_leg_angle < 90 and right_leg_angle < 90:
+                    return "defense"
+                else:
+                    return "running"
+            except (AttributeError, KeyError) as e:
+                logger.error(f"Error accessing pose landmarks: {str(e)}")
+                return "unknown"
                 
         except Exception as e:
             logger.error(f"Error in action recognition: {str(e)}")
@@ -353,17 +388,27 @@ class VideoProcessor:
     
     def _calculate_angle(self, a, b, c):
         """Calculate angle between three points"""
-        a = np.array([a.x, a.y])
-        b = np.array([b.x, b.y])
-        c = np.array([c.x, c.y])
-        
-        ba = a - b
-        bc = c - b
-        
-        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
-        angle = np.arccos(cosine_angle)
-        
-        return np.degrees(angle)
+        try:
+            # Convert MediaPipe landmarks to numpy arrays
+            a = np.array([float(a.x), float(a.y)])
+            b = np.array([float(b.x), float(b.y)])
+            c = np.array([float(c.x), float(c.y)])
+            
+            ba = a - b
+            bc = c - b
+            
+            # Calculate cosine angle
+            cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+            # Ensure cosine_angle is within valid range [-1, 1]
+            cosine_angle = np.clip(cosine_angle, -1.0, 1.0)
+            
+            # Calculate angle in degrees
+            angle = np.degrees(np.arccos(cosine_angle))
+            
+            return float(angle)  # Convert to Python float
+        except (AttributeError, ValueError, ZeroDivisionError) as e:
+            logger.error(f"Error calculating angle: {str(e)}")
+            return 0.0  # Return 0 degrees as a fallback
 
     def get_video_hash(self, video_path: str) -> str:
         """
@@ -531,7 +576,8 @@ class VideoProcessor:
         video_path: str,
         output_path: Optional[str] = None,
         confidence_threshold: float = 0.5,
-        force_reprocess: bool = False
+        force_reprocess: bool = False,
+        progress_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
         """
         Process a basketball video to detect and track players
@@ -541,6 +587,7 @@ class VideoProcessor:
             output_path: Optional path to save the processed video
             confidence_threshold: Minimum confidence score for detections
             force_reprocess: Force reprocessing even if cached results exist
+            progress_callback: Optional callback function to report progress
             
         Returns:
             Dictionary containing analysis results
@@ -563,12 +610,23 @@ class VideoProcessor:
 
             video_info = validation["metadata"]
             
+            # Calculate frame skip based on video duration
+            # For videos longer than 5 minutes, process every 4th frame
+            # For videos longer than 10 minutes, process every 6th frame
+            if video_info["duration"] > 600:  # 10 minutes
+                frame_skip = 6
+            elif video_info["duration"] > 300:  # 5 minutes
+                frame_skip = 4
+            else:
+                frame_skip = 2
+            logger.info(f"Using frame skip of {frame_skip} for video duration of {video_info['duration']:.1f} seconds")
+            
             # Test models with first frame
             cap = cv2.VideoCapture(video_path)
             ret, test_frame = cap.read()
             if ret:
                 # Resize test frame for faster processing
-                test_frame = cv2.resize(test_frame, (640, 480))
+                test_frame = cv2.resize(test_frame, (480, 360))  # Reduced resolution
                 test_results = self.test_models(test_frame)
                 logger.info(f"Model test results: {test_results}")
                 if not all(test_results.values()):
@@ -600,28 +658,31 @@ class VideoProcessor:
             last_progress_update = time.time()
             progress_interval = 5  # Update progress every 5 seconds
 
-            # Process in chunks to avoid memory issues
-            chunk_size = 10  # Process 10 frames at a time
+            # Process in larger batches for better performance
+            # Increase batch size for longer videos
+            batch_size = 256 if video_info["duration"] > 300 else 128
             total_frames = int(video_info["frame_count"])
             processed_frames = 0
-            frame_skip = 2  # Process every 2nd frame to speed up processing
+            frames_buffer = []
 
             while cap.isOpened():
-                # Process chunk of frames
-                for _ in range(chunk_size):
-                    # Skip frames to speed up processing
-                    for _ in range(frame_skip):
-                        ret = cap.grab()
-                        if not ret:
-                            break
-                    
+                # Read batch of frames with frame skipping
+                frames_buffer = []
+                for _ in range(batch_size):
+                    for _ in range(frame_skip - 1):  # Skip frames
+                        cap.grab()
                     ret, frame = cap.read()
                     if not ret:
                         break
-
                     # Resize frame for faster processing
-                    frame = cv2.resize(frame, (640, 480))
+                    frame = cv2.resize(frame, (480, 360))  # Reduced resolution
+                    frames_buffer.append(frame)
 
+                if not frames_buffer:
+                    break
+
+                # Process batch of frames
+                for frame in frames_buffer:
                     # Detect players in current frame
                     detections = self.detect_players(frame)
                     
@@ -646,7 +707,7 @@ class VideoProcessor:
                         player_tracks[player_id]['movements'].append({
                             'frame': frame_idx,
                             'timestamp': frame_idx / video_info["fps"],
-                            'position': player['position'],
+                            'position': [(player['bbox'][0] + player['bbox'][2])/2, (player['bbox'][1] + player['bbox'][3])/2],
                             'action': action,
                             'pose': pose if pose else {'keypoints': []}
                         })
@@ -690,7 +751,7 @@ class VideoProcessor:
                             "score": score.copy()
                         }
 
-                    frame_idx += 1
+                    frame_idx += frame_skip  # Increment by frame_skip
                     processed_frames += 1
 
                 # Update progress periodically
@@ -710,6 +771,18 @@ class VideoProcessor:
                         f"Plays detected: {len(plays)} | "
                         f"Memory usage: {torch.cuda.memory_allocated()/1024**2:.1f}MB"
                     )
+                    
+                    # Call progress callback if provided
+                    if progress_callback:
+                        progress_callback({
+                            "status": "processing",
+                            "progress": progress,
+                            "fps": fps,
+                            "elapsed_time": elapsed_time,
+                            "estimated_remaining": estimated_remaining,
+                            "plays_detected": len(plays)
+                        })
+                    
                     last_progress_update = current_time
 
                 # Break if we've processed all frames
@@ -755,7 +828,7 @@ class VideoProcessor:
                     "processing_speed": frame_idx/total_time,
                     "memory_usage": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
                     "frame_skip": frame_skip,
-                    "chunk_size": chunk_size
+                    "chunk_size": batch_size
                 },
                 "play_breakdown": play_breakdown
             }

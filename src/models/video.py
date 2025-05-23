@@ -2,6 +2,13 @@ from sqlalchemy import Column, Integer, String, DateTime, JSON, Float, Text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .db import Base
+from enum import Enum
+
+class VideoStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    ERROR = "error"
 
 class Video(Base):
     __tablename__ = "videos"

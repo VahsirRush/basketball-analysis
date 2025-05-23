@@ -77,6 +77,13 @@ async def process_video_async(video_id: int, file_path: str, db: Session):
     try:
         logger.info(f"Starting video processing for video_id: {video_id}")
         
+        # Initialize processing status
+        processing_status[video_id] = {
+            "status": "processing",
+            "progress": 0,
+            "error_message": None
+        }
+        
         # Update video status
         video = db.query(Video).filter(Video.id == video_id).first()
         if not video:
@@ -87,23 +94,47 @@ async def process_video_async(video_id: int, file_path: str, db: Session):
         db.commit()
         logger.info(f"Updated video {video_id} status to processing")
 
-        # Process video
+        # Process video with progress callback
         try:
-            result = video_processor.process_video(file_path)
+            def progress_callback(progress_data):
+                processing_status[video_id] = {
+                    "status": progress_data["status"],
+                    "progress": progress_data["progress"],
+                    "error_message": None,
+                    "fps": progress_data["fps"],
+                    "elapsed_time": progress_data["elapsed_time"],
+                    "estimated_remaining": progress_data["estimated_remaining"],
+                    "plays_detected": progress_data["plays_detected"]
+                }
+            
+            result = video_processor.process_video(file_path, progress_callback=progress_callback)
             logger.info(f"Video processing completed for video_id: {video_id}")
+            
+            # Update processing status
+            processing_status[video_id] = {
+                "status": "completed",
+                "progress": 100,
+                "error_message": None
+            }
         except Exception as e:
             logger.error(f"Error in video processing for video_id {video_id}: {str(e)}")
+            processing_status[video_id] = {
+                "status": "error",
+                "progress": 0,
+                "error_message": str(e)
+            }
             raise
         
         # Save analysis results
         try:
             analysis = Analysis(
                 video_id=video_id,
-                start_frame=result.get("start_frame", 0),
-                end_frame=result.get("end_frame", 0),
-                play_type=result.get("play_type"),
-                confidence=result.get("confidence"),
-                analysis_metadata=result.get("metadata", {})
+                start_frame=result.get("plays", [{}])[0].get("start_frame", 0) if result.get("plays") else 0,
+                end_frame=result.get("plays", [{}])[-1].get("end_frame", 0) if result.get("plays") else 0,
+                play_type=result.get("play_breakdown", {}).get("play_types", {}).keys()[0] if result.get("play_breakdown", {}).get("play_types") else None,
+                confidence=1.0,  # Default confidence since we don't have a specific metric
+                analysis_metadata=result,  # Store the entire result as metadata
+                processing_time=result.get("processing_stats", {}).get("total_time")
             )
             db.add(analysis)
             db.commit()
@@ -190,11 +221,14 @@ async def upload_video(
                 detail="Invalid file format. Supported formats: MP4, AVI, MOV, MKV"
             )
         
-        # Save file
+        # Save file with chunked reading
         file_path = UPLOAD_DIR / file.filename
         try:
             with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                # Read and write in chunks of 1MB
+                chunk_size = 1024 * 1024
+                while chunk := await file.read(chunk_size):
+                    buffer.write(chunk)
             logger.info(f"File saved successfully: {file_path}")
         except Exception as e:
             logger.error(f"Error saving file: {str(e)}")
@@ -275,6 +309,9 @@ def get_analysis(video_id: int, db: Session = Depends(get_db)):
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
         
+        # Get plays from analysis metadata
+        plays = analysis.analysis_metadata.get('plays', [])
+        
         # Return structured response
         return {
             "id": analysis.id,
@@ -285,7 +322,8 @@ def get_analysis(video_id: int, db: Session = Depends(get_db)):
             "end_frame": analysis.end_frame,
             "processing_time": analysis.processing_time,
             "analysis_metadata": analysis.analysis_metadata,
-            "created_at": analysis.created_at
+            "created_at": analysis.created_at,
+            "plays": plays  # Include plays in the response
         }
     except HTTPException:
         raise

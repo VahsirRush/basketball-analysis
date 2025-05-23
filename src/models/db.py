@@ -23,8 +23,8 @@ Base = declarative_base()
 def init_db():
     """Initialize the database by dropping and recreating all tables"""
     try:
-        # Drop all tables
-        Base.metadata.drop_all(bind=engine)
+        # Drop all tables with CASCADE to handle foreign key constraints
+        Base.metadata.drop_all(bind=engine, checkfirst=True)
         logger.info("Existing database tables dropped")
         
         # Create all tables

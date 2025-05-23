@@ -127,14 +127,27 @@ async def process_video_async(video_id: int, file_path: str, db: Session):
         
         # Save analysis results
         try:
-            play_types = list(result.get("play_breakdown", {}).get("play_types", {}).keys())
+            # Get the first play's start frame and last play's end frame
+            plays = result.get("plays", [])
+            start_frame = plays[0]["start_frame"] if plays else 0
+            end_frame = plays[-1]["end_frame"] if plays else 0
+            
+            # Get the most common play type
+            play_types = result.get("play_breakdown", {}).get("play_types", {})
+            most_common_play_type = max(play_types.items(), key=lambda x: x[1]["count"])[0] if play_types else None
+            
             analysis = Analysis(
                 video_id=video_id,
-                start_frame=result.get("plays", [{}])[0].get("start_frame", 0) if result.get("plays") else 0,
-                end_frame=result.get("plays", [{}])[-1].get("end_frame", 0) if result.get("plays") else 0,
-                play_type=play_types[0] if play_types else None,
+                start_frame=start_frame,
+                end_frame=end_frame,
+                play_type=most_common_play_type,
                 confidence=1.0,  # Default confidence since we don't have a specific metric
-                analysis_metadata=result,  # Store the entire result as metadata
+                analysis_metadata={
+                    "plays": plays,
+                    "play_breakdown": result.get("play_breakdown", {}),
+                    "processing_stats": result.get("processing_stats", {}),
+                    "video_info": result.get("video_info", {})
+                },
                 processing_time=result.get("processing_stats", {}).get("total_time")
             )
             db.add(analysis)

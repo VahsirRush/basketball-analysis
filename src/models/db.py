@@ -1,7 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, JSON, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from sqlalchemy.orm import sessionmaker
 import os
 import logging
 
@@ -21,41 +20,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create base class for models
 Base = declarative_base()
 
-class Video(Base):
-    __tablename__ = "videos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String, index=True)
-    upload_time = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="pending")  # pending, processing, completed, error
-    error_message = Column(Text, nullable=True)
-    duration = Column(Float, nullable=True)
-    video_metadata = Column(JSON, nullable=True)
-    analysis = relationship("Analysis", back_populates="video", uselist=False)
-
-    def __repr__(self):
-        return f"<Video(id={self.id}, filename='{self.filename}', status='{self.status}')>"
-
-class Analysis(Base):
-    __tablename__ = "analyses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    video_id = Column(Integer, ForeignKey("videos.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    result_json = Column(JSON)
-    processing_time = Column(Float, nullable=True)  # in seconds
-    video = relationship("Video", back_populates="analysis")
-
-    def __repr__(self):
-        return f"<Analysis(id={self.id}, video_id={self.video_id})>"
-
 def init_db():
-    """Initialize the database, creating all tables"""
+    """Initialize the database by dropping and recreating all tables"""
     try:
+        # Drop all tables
+        Base.metadata.drop_all(bind=engine)
+        logger.info("Existing database tables dropped")
+        
+        # Create all tables
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
     except Exception as e:
-        logger.error(f"Error creating database tables: {str(e)}")
+        logger.error(f"Error initializing database: {str(e)}")
         raise
 
 def get_db():

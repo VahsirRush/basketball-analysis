@@ -17,6 +17,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app-network
 
   redis:
     image: redis:6-alpine
@@ -27,6 +29,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app-network
 
   backend:
     build:
@@ -35,6 +39,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/basketball_analysis
       REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:3000
     volumes:
       - ./src:/app
       - ./uploads:/app/uploads
@@ -46,20 +51,43 @@ services:
       redis:
         condition: service_healthy
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    environment:
+      - REACT_APP_API_URL=http://backend:8000
+      - REACT_APP_ENV=development
+      - GENERATE_SOURCEMAP=false
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
     ports:
       - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   postgres_data: 

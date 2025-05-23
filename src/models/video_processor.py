@@ -8,8 +8,6 @@ import torch
 import json
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import mediapipe as mp
-from mmaction.apis import inference_recognizer, init_recognizer
-from mmaction.structures import ActionDataSample
 import os
 import time
 import hashlib
@@ -71,28 +69,6 @@ class VideoProcessor:
                 logger.error(f"Failed to initialize MediaPipe: {str(e)}")
                 raise
             
-            # Initialize MMAction2 for action recognition
-            try:
-                config_path = 'configs/recognition/tsn/tsn_r50_1x1x8_100e_kinetics400_rgb.py'
-                checkpoint_path = 'checkpoints/tsn_r50_1x1x8_100e_kinetics400_rgb_20200618-2692d16c.pth'
-                
-                if not os.path.exists(config_path):
-                    logger.warning(f"MMAction2 config not found at {config_path}")
-                    self.action_recognizer = None
-                elif not os.path.exists(checkpoint_path):
-                    logger.warning(f"MMAction2 checkpoint not found at {checkpoint_path}")
-                    self.action_recognizer = None
-                else:
-                    self.action_recognizer = init_recognizer(
-                        config_path,
-                        checkpoint_path,
-                        device=self.device
-                    )
-                    logger.info("MMAction2 model loaded successfully")
-            except Exception as e:
-                logger.warning(f"Failed to initialize MMAction2: {str(e)}")
-                self.action_recognizer = None
-            
             self.models_initialized = True
             logger.info("All ML models initialized successfully")
             
@@ -114,8 +90,7 @@ class VideoProcessor:
         results = {
             'yolov8': False,
             'deepsort': False,
-            'mediapipe': False,
-            'mmaction2': False
+            'mediapipe': False
         }
         
         try:
@@ -151,18 +126,6 @@ class VideoProcessor:
                             break
             except Exception as e:
                 logger.error(f"MediaPipe test failed: {str(e)}")
-            
-            # Test MMAction2
-            try:
-                if self.action_recognizer is not None and results['yolov8']:
-                    for detection in detections:
-                        action = self.recognize_action(test_frame, detection['bbox'])
-                        if action != "unknown":
-                            results['mmaction2'] = True
-                            logger.info(f"MMAction2 test successful. Detected action: {action}")
-                            break
-            except Exception as e:
-                logger.error(f"MMAction2 test failed: {str(e)}")
             
             return results
             
@@ -275,10 +238,9 @@ class VideoProcessor:
         """
         # Convert detections to DeepSORT format
         bboxes = np.array([d['bbox'] for d in detections])
-        scores = np.array([d['confidence'] for d in detections])
         
-        # Update tracker
-        tracks = self.tracker.update_tracks(bboxes, scores=scores, frame=frame)
+        # Update tracker - DeepSORT expects bboxes in [x1, y1, x2, y2] format
+        tracks = self.tracker.update_tracks(bboxes, frame=frame)
         
         # Convert tracks to our format
         tracked_players = []
@@ -332,32 +294,76 @@ class VideoProcessor:
 
     def recognize_action(self, frame: np.ndarray, bbox: List[float]) -> str:
         """
-        Recognize player action using MMAction2
+        Recognize basketball action based on pose estimation
         
         Args:
             frame: Input frame
-            bbox: Player bounding box [x1, y1, x2, y2]
+            bbox: Bounding box coordinates [x1, y1, x2, y2]
             
         Returns:
-            Recognized action label
+            String representing the detected action
         """
-        x1, y1, x2, y2 = map(int, bbox)
-        player_roi = frame[y1:y2, x1:x2]
-        
-        if player_roi.size == 0:
-            return "unknown"
+        try:
+            # Extract player region
+            x1, y1, x2, y2 = map(int, bbox)
+            player_region = frame[y1:y2, x1:x2]
             
-        # Prepare input for MMAction2
-        data = {
-            'imgs': player_roi,
-            'label': -1,
-            'modality': 'RGB',
-            'num_clips': 1,
-            'clip_len': 1
-        }
+            if player_region.size == 0:
+                return "unknown"
+            
+            # Get pose landmarks
+            pose_results = self.pose.process(player_region)
+            if not pose_results.pose_landmarks:
+                return "unknown"
+            
+            # Extract key points
+            landmarks = pose_results.pose_landmarks.landmark
+            
+            # Get relevant key points
+            left_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
+            right_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+            left_elbow = landmarks[self.mp_pose.PoseLandmark.LEFT_ELBOW]
+            right_elbow = landmarks[self.mp_pose.PoseLandmark.RIGHT_ELBOW]
+            left_wrist = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST]
+            right_wrist = landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST]
+            left_hip = landmarks[self.mp_pose.PoseLandmark.LEFT_HIP]
+            right_hip = landmarks[self.mp_pose.PoseLandmark.RIGHT_HIP]
+            left_knee = landmarks[self.mp_pose.PoseLandmark.LEFT_KNEE]
+            right_knee = landmarks[self.mp_pose.PoseLandmark.RIGHT_KNEE]
+            
+            # Calculate angles
+            left_arm_angle = self._calculate_angle(left_shoulder, left_elbow, left_wrist)
+            right_arm_angle = self._calculate_angle(right_shoulder, right_elbow, right_wrist)
+            left_leg_angle = self._calculate_angle(left_hip, left_knee, left_wrist)
+            right_leg_angle = self._calculate_angle(right_hip, right_knee, right_wrist)
+            
+            # Simple action recognition based on pose angles
+            if left_arm_angle > 150 and right_arm_angle > 150:
+                return "shooting"
+            elif left_arm_angle < 90 and right_arm_angle < 90:
+                return "dribbling"
+            elif left_leg_angle < 90 and right_leg_angle < 90:
+                return "defense"
+            else:
+                return "running"
+                
+        except Exception as e:
+            logger.error(f"Error in action recognition: {str(e)}")
+            return "unknown"
+    
+    def _calculate_angle(self, a, b, c):
+        """Calculate angle between three points"""
+        a = np.array([a.x, a.y])
+        b = np.array([b.x, b.y])
+        c = np.array([c.x, c.y])
         
-        result = inference_recognizer(self.action_recognizer, data)
-        return result.pred_label.item()
+        ba = a - b
+        bc = c - b
+        
+        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+        angle = np.arccos(cosine_angle)
+        
+        return np.degrees(angle)
 
     def get_video_hash(self, video_path: str) -> str:
         """
@@ -561,6 +567,8 @@ class VideoProcessor:
             cap = cv2.VideoCapture(video_path)
             ret, test_frame = cap.read()
             if ret:
+                # Resize test frame for faster processing
+                test_frame = cv2.resize(test_frame, (640, 480))
                 test_results = self.test_models(test_frame)
                 logger.info(f"Model test results: {test_results}")
                 if not all(test_results.values()):
@@ -589,85 +597,124 @@ class VideoProcessor:
 
             logger.info(f"Starting video processing: {video_info}")
             start_time = time.time()
+            last_progress_update = time.time()
+            progress_interval = 5  # Update progress every 5 seconds
+
+            # Process in chunks to avoid memory issues
+            chunk_size = 10  # Process 10 frames at a time
+            total_frames = int(video_info["frame_count"])
+            processed_frames = 0
+            frame_skip = 2  # Process every 2nd frame to speed up processing
 
             while cap.isOpened():
-                ret, frame = cap.read()
+                # Process chunk of frames
+                for _ in range(chunk_size):
+                    # Skip frames to speed up processing
+                    for _ in range(frame_skip):
+                        ret = cap.grab()
+                        if not ret:
+                            break
+                    
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    # Resize frame for faster processing
+                    frame = cv2.resize(frame, (640, 480))
+
+                    # Detect players in current frame
+                    detections = self.detect_players(frame)
+                    
+                    # Track players
+                    tracked_players = self.track_players(frame, detections)
+                    
+                    # Update player tracks
+                    for player in tracked_players:
+                        player_id = player['id']
+                        if player_id not in player_tracks:
+                            player_tracks[player_id] = {
+                                'id': player_id,
+                                'role': 'player',
+                                'movements': []
+                            }
+                        
+                        # Get pose and action
+                        pose = self.estimate_pose(frame, player['bbox'])
+                        action = self.recognize_action(frame, player['bbox'])
+                        
+                        # Add movement
+                        player_tracks[player_id]['movements'].append({
+                            'frame': frame_idx,
+                            'timestamp': frame_idx / video_info["fps"],
+                            'position': player['position'],
+                            'action': action,
+                            'pose': pose if pose else {'keypoints': []}
+                        })
+
+                    # Detect play boundaries based on player movements
+                    is_play_boundary = False
+                    if current_play:
+                        # Check if players have moved significantly
+                        player_movement = False
+                        for player in tracked_players:
+                            if len(player_tracks[player['id']]['movements']) > 1:
+                                last_pos = player_tracks[player['id']]['movements'][-2]['position']
+                                current_pos = player_tracks[player['id']]['movements'][-1]['position']
+                                movement = np.linalg.norm(np.array(current_pos) - np.array(last_pos))
+                                if movement > 50:  # Threshold for significant movement
+                                    player_movement = True
+                                    break
+                        
+                        # End play if no significant movement for threshold duration
+                        if not player_movement and (frame_idx - last_play_end) >= play_boundary_threshold:
+                            is_play_boundary = True
+
+                    if is_play_boundary and current_play:
+                        # End current play
+                        current_play["end_frame"] = frame_idx
+                        current_play["end_time"] = frame_idx / video_info["fps"]
+                        current_play["players"] = list(player_tracks.values())
+                        plays.append(current_play)
+                        last_play_end = frame_idx
+                        current_play = None
+                        player_tracks = {}  # Reset tracks for new play
+
+                    # Start new play if needed
+                    if not current_play and (frame_idx - last_play_end) >= min_play_duration:
+                        current_play = {
+                            "id": len(plays) + 1,
+                            "start_frame": frame_idx,
+                            "start_time": frame_idx / video_info["fps"],
+                            "type": "play",
+                            "team_possession": possession,
+                            "score": score.copy()
+                        }
+
+                    frame_idx += 1
+                    processed_frames += 1
+
+                # Update progress periodically
+                current_time = time.time()
+                if current_time - last_progress_update >= progress_interval:
+                    elapsed_time = current_time - start_time
+                    fps = processed_frames / elapsed_time
+                    progress = (processed_frames / total_frames) * 100
+                    estimated_remaining = (total_frames - processed_frames) / fps if fps > 0 else 0
+                    
+                    # Log detailed progress
+                    logger.info(
+                        f"Progress: {progress:.1f}% ({processed_frames}/{total_frames} frames) | "
+                        f"Speed: {fps:.2f} fps | "
+                        f"Elapsed: {elapsed_time:.1f}s | "
+                        f"Remaining: {estimated_remaining:.1f}s | "
+                        f"Plays detected: {len(plays)} | "
+                        f"Memory usage: {torch.cuda.memory_allocated()/1024**2:.1f}MB"
+                    )
+                    last_progress_update = current_time
+
+                # Break if we've processed all frames
                 if not ret:
                     break
-
-                # Detect players in current frame
-                detections = self.detect_players(frame)
-                
-                # Track players
-                tracked_players = self.track_players(frame, detections)
-                
-                # Update player tracks
-                for player in tracked_players:
-                    player_id = player['id']
-                    if player_id not in player_tracks:
-                        player_tracks[player_id] = {
-                            'id': player_id,
-                            'role': 'player',  # Could be determined by position/behavior
-                            'movements': []
-                        }
-                    
-                    # Get pose and action
-                    pose = self.estimate_pose(frame, player['bbox'])
-                    action = self.recognize_action(frame, player['bbox'])
-                    
-                    # Add movement
-                    player_tracks[player_id]['movements'].append({
-                        'frame': frame_idx,
-                        'timestamp': frame_idx / video_info["fps"],
-                        'position': player['position'],
-                        'action': action,
-                        'pose': pose if pose else {'keypoints': []}
-                    })
-
-                # Detect play boundaries based on player movements
-                is_play_boundary = False
-                if current_play:
-                    # Check if players have moved significantly
-                    player_movement = False
-                    for player in tracked_players:
-                        if len(player_tracks[player['id']]['movements']) > 1:
-                            last_pos = player_tracks[player['id']]['movements'][-2]['position']
-                            current_pos = player_tracks[player['id']]['movements'][-1]['position']
-                            movement = np.linalg.norm(np.array(current_pos) - np.array(last_pos))
-                            if movement > 50:  # Threshold for significant movement
-                                player_movement = True
-                                break
-                    
-                    # End play if no significant movement for threshold duration
-                    if not player_movement and (frame_idx - last_play_end) >= play_boundary_threshold:
-                        is_play_boundary = True
-
-                if is_play_boundary and current_play:
-                    # End current play
-                    current_play["end_frame"] = frame_idx
-                    current_play["end_time"] = frame_idx / video_info["fps"]
-                    current_play["players"] = list(player_tracks.values())
-                    plays.append(current_play)
-                    last_play_end = frame_idx
-                    current_play = None
-                    player_tracks = {}  # Reset tracks for new play
-
-                # Start new play if needed
-                if not current_play and (frame_idx - last_play_end) >= min_play_duration:
-                    current_play = {
-                        "id": len(plays) + 1,
-                        "start_frame": frame_idx,
-                        "start_time": frame_idx / video_info["fps"],
-                        "type": "play",  # Will be determined by analyze_play_type
-                        "team_possession": possession,
-                        "score": score.copy()
-                    }
-
-                frame_idx += 1
-                if frame_idx % 100 == 0:
-                    elapsed_time = time.time() - start_time
-                    fps = frame_idx / elapsed_time
-                    logger.info(f"Processed {frame_idx}/{video_info['frame_count']} frames ({fps:.2f} fps)")
 
             # Add the last play if exists
             if current_play:
@@ -704,7 +751,11 @@ class VideoProcessor:
                     "total_time": total_time,
                     "total_frames": frame_idx,
                     "average_fps": frame_idx/total_time,
-                    "play_count": len(plays)
+                    "play_count": len(plays),
+                    "processing_speed": frame_idx/total_time,
+                    "memory_usage": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                    "frame_skip": frame_skip,
+                    "chunk_size": chunk_size
                 },
                 "play_breakdown": play_breakdown
             }

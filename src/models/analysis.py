@@ -4,7 +4,8 @@ from sqlalchemy.orm import relationship
 from .db import Base
 
 class Analysis(Base):
-    __tablename__ = "plays"
+    __tablename__ = "analyses"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     video_id = Column(Integer, ForeignKey("videos.id"))
@@ -12,7 +13,11 @@ class Analysis(Base):
     end_frame = Column(Integer, nullable=False)
     play_type = Column(String)
     confidence = Column(Float)
-    metadata = Column(JSON)
+    analysis_metadata = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    processing_time = Column(Float, nullable=True)  # in seconds
 
-    video = relationship("Video", back_populates="analyses") 
+    video = relationship("Video", back_populates="analyses")
+
+    def __repr__(self):
+        return f"<Analysis(id={self.id}, video_id={self.video_id}, play_type='{self.play_type}')>" 

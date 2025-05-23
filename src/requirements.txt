@@ -43,7 +43,7 @@ tqdm==4.66.1
 # Additional ML model dependencies
 mmcv>=2.0.1
 mmpose==1.1.0
-# mmaction2==1.0.0  # Removed due to decord dependency
+opencv-python-headless==4.8.1.78
 scikit-learn==1.3.2
 pandas==2.1.3
 

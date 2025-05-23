@@ -65,4 +65,4 @@ uploads/
 *.log
 .coverage
 htmlcov/
-.pytest_cache/ 
+.pytest_cache/ src/yolov8x.pt

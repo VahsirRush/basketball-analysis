@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Play Analysis</title>
+    <link rel="stylesheet" href="styles.css?v=1.0.1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="assets/logo.svg" alt="NBA Play Analysis">
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active">
+                    <span class="icon">🎥</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="icon">📊</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="icon">🏀</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="icon">⚙️</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <h1>Video Analysis</h1>
+                <div class="actions">
+                    <button class="btn-secondary">
+                        <span class="icon">📁</span>
+                        Import Video
+                    </button>
+                    <button class="btn-primary">
+                        <span class="icon">▶️</span>
+                        Start Analysis
+                    </button>
+                </div>
+            </header>
+
+            <!-- Video Upload Section -->
+            <section class="upload-section">
+                <div class="upload-container">
+                    <div class="upload-area" id="dropZone">
+                        <img src="assets/upload-icon.svg" alt="Upload">
+                        <h3>Drag and drop your video here</h3>
+                        <p>or</p>
+                        <button class="btn-secondary">Browse Files</button>
+                        <p class="file-types">Supported formats: MP4, MOV, AVI</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analysis Results -->
+            <section class="results-section">
+                <div class="results-header">
+                    <h2>Analysis Results</h2>
+                    <div class="filters">
+                        <select class="filter-select">
+                            <option value="all">All Plays</option>
+                            <option value="pick-roll">Pick & Roll</option>
+                            <option value="post-up">Post Up</option>
+                            <option value="isolation">Isolation</option>
+                        </select>
+                        <button class="btn-icon">🔍</button>
+                    </div>
+                </div>
+
+                <div class="results-grid">
+                    <!-- Play Card Template -->
+                    <div class="play-card">
+                        <div class="play-video">
+                            <img src="assets/court-diagram.svg" alt="Play Preview">
+                            <div class="play-overlay">
+                                <span class="play-duration">0:24</span>
+                                <button class="btn-play">▶️</button>
+                            </div>
+                        </div>
+                        <div class="play-info">
+                            <h3>Pick & Roll</h3>
+                            <div class="play-stats">
+                                <span class="stat">
+                                    <span class="icon">⏱️</span>
+                                    24s
+                                </span>
+                                <span class="stat">
+                                    <span class="icon">👥</span>
+                                    10 Players
+                                </span>
+                            </div>
+                            <div class="play-actions">
+                                <button class="btn-icon">📊</button>
+                                <button class="btn-icon">💾</button>
+                                <button class="btn-icon">↗️</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Analysis Panel -->
+        <aside class="analysis-panel">
+            <div class="panel-header">
+                <h2>Play Analysis</h2>
+                <button class="btn-icon">✕</button>
+            </div>
+            <div class="panel-content">
+                <div class="analysis-section">
+                    <h3>Play Type</h3>
+                    <div class="play-type">
+                        <span class="type-badge">Pick & Roll</span>
+                        <span class="confidence">98%</span>
+                    </div>
+                </div>
+                <div class="analysis-section">
+                    <h3>Player Movements</h3>
+                    <div class="movement-list">
+                        <div class="movement-item">
+                            <span class="player">#23</span>
+                            <span class="movement">Cut to Basket</span>
+                            <span class="confidence">95%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="analysis-section">
+                    <h3>Court Detection</h3>
+                    <div class="court-preview">
+                        <img src="assets/court-diagram.svg" alt="Court Diagram">
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html> 

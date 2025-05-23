@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Basketball Play Analysis Result",
+  "type": "object",
+  "properties": {
+    "plays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "integer"},
+          "type": {"type": "string"},
+          "duration": {"type": "number"},
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "number": {"type": "integer"},
+                "position": {
+                  "type": "object",
+                  "properties": {
+                    "x": {"type": "number"},
+                    "y": {"type": "number"}
+                  },
+                  "required": ["x", "y"]
+                },
+                "team": {"type": "string", "enum": ["offense", "defense"]},
+                "hasBall": {"type": "boolean"}
+              },
+              "required": ["number", "position", "team"]
+            }
+          },
+          "movements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "playerNumber": {"type": "integer"},
+                "type": {"type": "string", "enum": ["cut", "screen", "pass", "dribble", "handoff"]},
+                "start": {
+                  "type": "object",
+                  "properties": {
+                    "x": {"type": "number"},
+                    "y": {"type": "number"}
+                  },
+                  "required": ["x", "y"]
+                },
+                "end": {
+                  "type": "object",
+                  "properties": {
+                    "x": {"type": "number"},
+                    "y": {"type": "number"}
+                  },
+                  "required": ["x", "y"]
+                },
+                "confidence": {"type": "number"}
+              },
+              "required": ["playerNumber", "type", "start", "end"]
+            }
+          }
+        },
+        "required": ["id", "type", "duration", "players", "movements"]
+      }
+    }
+  },
+  "required": ["plays"]
+} 

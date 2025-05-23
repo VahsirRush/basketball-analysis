@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Court Outline -->
+    <rect x="0" y="0" width="400" height="400" fill="#f8f9fa" stroke="#000" stroke-width="2"/>
+    
+    <!-- Center Circle -->
+    <circle cx="200" cy="200" r="40" stroke="#000" stroke-width="2" fill="none"/>
+    
+    <!-- Three Point Line -->
+    <path d="M0 0h400v400h-400z" stroke="#000" stroke-width="2" fill="none"/>
+    <path d="M40 0v400" stroke="#000" stroke-width="2"/>
+    <path d="M360 0v400" stroke="#000" stroke-width="2"/>
+    
+    <!-- Key Area -->
+    <rect x="160" y="0" width="80" height="80" stroke="#000" stroke-width="2" fill="none"/>
+    <rect x="160" y="320" width="80" height="80" stroke="#000" stroke-width="2" fill="none"/>
+    
+    <!-- Free Throw Circle -->
+    <circle cx="200" cy="80" r="40" stroke="#000" stroke-width="2" fill="none"/>
+    <circle cx="200" cy="320" r="40" stroke="#000" stroke-width="2" fill="none"/>
+</svg> 

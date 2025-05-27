@@ -9,7 +9,7 @@ services:
       POSTGRES_DB: basketball_analysis
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./src/sql:/docker-entrypoint-initdb.d
+      - ./sql:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
     healthcheck:
@@ -34,14 +34,14 @@ services:
 
   backend:
     build:
-      context: ./src
+      context: .
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/basketball_analysis
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: http://localhost:3000
     volumes:
-      - ./src:/app
+      - .:/app
       - ./uploads:/app/uploads
     ports:
       - "8000:8000"
@@ -64,14 +64,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     environment:
-      - REACT_APP_API_URL=http://backend:8000
+      - REACT_APP_API_URL=http://localhost:8000
       - REACT_APP_ENV=development
       - GENERATE_SOURCEMAP=false
       - NODE_ENV=development
-      - WATCHPACK_POLLING=true
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     ports:
       - "3000:3000"
     depends_on:
@@ -80,7 +76,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:3000"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
